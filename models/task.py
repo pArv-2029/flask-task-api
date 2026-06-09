@@ -7,6 +7,7 @@ class Task(db.Model):
     __tablename__ = 'tasks'
 
     id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     title       = db.Column(db.String(100), nullable=False)
     description = db.Column(db.String(500), nullable=True)
     done        = db.Column(db.Boolean, default=False)
@@ -17,6 +18,7 @@ class Task(db.Model):
     def to_dict(self):
         return {
             "id":          self.id,
+            "user_id":     self.user_id,
             "title":       self.title,
             "description": self.description,
             "done":        self.done,

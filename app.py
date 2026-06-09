@@ -5,6 +5,7 @@ from models.task import db, Task
 from models.user import User
 from models.token import RefreshToken
 from auth import auth
+from decorators import admin_required, owner_or_admin_required
 import logging
 
 from models.file import TaskFile
@@ -100,57 +101,34 @@ def get_task(task_id):
 def create_task():
     user_id = get_jwt_identity()
     try:
-        logger.debug(f"POST /tasks called by user {user_id}")
         data = request.get_json()
         logger.debug(f"Request body received: {data}")
 
-        # VALIDATION 1 — body exists
         if not data:
-            logger.warning("POST /tasks — body missing")
             return jsonify({"error": "Request body is missing"}), 400
-
-        # VALIDATION 2 — title exists
         if "title" not in data:
-            logger.warning("POST /tasks — title missing")
             return jsonify({"error": "Title is required"}), 400
-
-        # VALIDATION 3 — title is a string
         if not isinstance(data["title"], str):
             return jsonify({"error": "Title must be a string"}), 400
-
-        # VALIDATION 4 — title not empty
         if not data["title"].strip():
             return jsonify({"error": "Title cannot be empty"}), 400
-
-        # VALIDATION 5 — title min length
         if len(data["title"].strip()) < 3:
             return jsonify({"error": "Title too short (min 3 chars)"}), 400
-
-        # VALIDATION 6 — title max length
         if len(data["title"].strip()) > 100:
             return jsonify({"error": "Title too long (max 100 chars)"}), 400
-
-        # VALIDATION 7 — title not only numbers
         if data["title"].strip().isnumeric():
             return jsonify({"error": "Title cannot be only numbers"}), 400
-
-        # VALIDATION 8 — priority valid
         if "priority" in data and data["priority"] not in VALID_PRIORITIES:
             return jsonify({"error": "Priority must be low, medium or high"}), 400
-
-        # VALIDATION 9 — done is boolean
         if "done" in data and not isinstance(data["done"], bool):
             return jsonify({"error": "Done must be true or false"}), 400
-
-        # VALIDATION 10 — description is string
         if "description" in data and not isinstance(data["description"], str):
             return jsonify({"error": "Description must be a string"}), 400
-
-        # VALIDATION 11 — description max length
         if "description" in data and len(data["description"]) > 500:
             return jsonify({"error": "Description too long (max 500 chars)"}), 400
 
         new_task = Task(
+            user_id     = int(user_id),        # ← link to user
             title       = data["title"].strip(),
             description = data.get("description", None),
             priority    = data.get("priority", "medium"),
@@ -158,7 +136,6 @@ def create_task():
         )
         db.session.add(new_task)
         db.session.commit()
-        logger.info(f"Task created by user {user_id}: {new_task.to_dict()}")
         return jsonify(new_task.to_dict()), 201
 
     except Exception as e:
@@ -166,12 +143,12 @@ def create_task():
         logger.error(f"Error in POST /tasks: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
 # -----------------------------------------------
 # UPDATE — PUT /tasks/<id>
 # -----------------------------------------------
 @app.route('/tasks/<int:task_id>', methods=['PUT'])
 @jwt_required()
+@owner_or_admin_required
 def update_task(task_id):
     user_id = get_jwt_identity()
     try:
@@ -236,6 +213,7 @@ def update_task(task_id):
 # -----------------------------------------------
 @app.route('/tasks/<int:task_id>', methods=['DELETE'])
 @jwt_required()
+@owner_or_admin_required
 def delete_task(task_id):
     user_id = get_jwt_identity()
     try:
@@ -266,6 +244,33 @@ def delete_task(task_id):
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok", "uptime": "100%"}), 200
+
+# -----------------------------------------------
+# GET ALL USERS — admin only
+# -----------------------------------------------
+@app.route('/users', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_users():
+    from models.user import User
+    users = User.query.all()
+    return jsonify({"users": [u.to_dict() for u in users], "count": len(users)}), 200
+
+
+# -----------------------------------------------
+# PROMOTE USER TO ADMIN — admin only
+# -----------------------------------------------
+@app.route('/users/<int:user_id>/promote', methods=['PUT'])
+@jwt_required()
+@admin_required
+def promote_user(user_id):
+    from models.user import User
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    user.role = 'admin'
+    db.session.commit()
+    return jsonify({"message": f"{user.username} promoted to admin"}), 200
 
 
 if __name__ == '__main__':
